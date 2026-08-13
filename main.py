@@ -60,12 +60,26 @@ class Reader:
                               sort_by=self.sort,
                               sort_order=arxiv.SortOrder.Descending,
                               )       
-        return search
+        # arxiv 1.4.3 uses an HTTP endpoint by default.  arXiv now redirects
+        # that endpoint to HTTPS, while this older client treats the 301 as an
+        # error instead of following it.
+        client = arxiv.Client(
+            page_size=max_results,
+            delay_seconds=3,
+            num_retries=5,
+        )
+        client.query_url_format = 'https://export.arxiv.org/api/query?{}'
+        return client, search
      
     def filter_arxiv(self, max_results=30):
-        search = self.get_arxiv(max_results=max_results)
+        client, search = self.get_arxiv(max_results=max_results)
+        try:
+            results = list(client.results(search))
+        except (arxiv.ArxivError, requests.RequestException) as exc:
+            print(f"arXiv query failed: {exc}")
+            return []
         print("all search:")
-        for index, result in enumerate(search.results()):
+        for index, result in enumerate(results):
             print(index, result.title, result.updated)
             
         filter_results = []   
@@ -73,7 +87,7 @@ class Reader:
         
         print("filter_keys:", self.filter_keys)
         # 确保每个关键词都能在摘要中找到，才算是目标论文
-        for index, result in enumerate(search.results()):
+        for index, result in enumerate(results):
             # 过滤不在时间范围内的论文
             if result.updated < self.filter_times_span[0] or result.updated > self.filter_times_span[1]:
                 continue 
