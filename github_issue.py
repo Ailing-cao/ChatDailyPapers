@@ -4,45 +4,72 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import json
+import os
 import requests
-from config import USERNAME, TOKEN, REPO_OWNER, REPO_NAME
 
-def make_github_issue(title, body=None, assignee=USERNAME, closed=False, labels=[]):
-    # Create an issue on github.com using the given parameters
-    # Url to create issues via POST
-    url = 'https://api.github.com/repos/%s/%s/import/issues' % (REPO_OWNER, REPO_NAME)
 
-    # Headers
+
+def _repository_name():
+    """Return the repository targeted by the GitHub API request."""
+    repository = os.getenv("GITHUB_REPOSITORY", "")
+    owner, separator, name = repository.partition("/")
+    if owner and separator and name:
+        return owner, name
+
+    owner = os.getenv("REPO_OWNER", "")
+    name = os.getenv("REPO_NAME", "")
+    if owner and name:
+        return owner, name
+
+    raise RuntimeError(
+        "Set GITHUB_REPOSITORY (owner/repository), or REPO_OWNER and REPO_NAME."
+    )
+
+
+def make_github_issue(title, body=None, assignee=None, labels=None):
+    """Create and verify a GitHub Issue using the standard Issues API."""
+    token = os.getenv("GITHUB_TOKEN", "")
+    if not token:
+        raise RuntimeError("GITHUB_TOKEN is required to create a GitHub Issue.")
+
+    owner, repository = _repository_name()
+    url = "https://api.github.com/repos/{}/{}/issues".format(owner, repository)
     headers = {
-        "Authorization": "token %s" % TOKEN,
-        "Accept": "application/vnd.github.golden-comet-preview+json"
+        "Authorization": "Bearer {}".format(token),
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
     }
+    payload = {"title": title, "body": body or ""}
+    if labels:
+        payload["labels"] = list(labels)
 
-    # Create our issue
-    data = {'issue': {'title': title,
-                      'body': body,
-                      'assignee': assignee,
-                      'closed': closed,
-                      'labels': labels}}
+    # Assigning github-actions[bot] fails for scheduled runs, so assignment is
+    # optional and must be requested explicitly.
+    assignee = assignee or os.getenv("GITHUB_ISSUE_ASSIGNEE", "")
+    if assignee:
+        payload["assignees"] = [assignee]
 
-    payload = json.dumps(data)
+    response = requests.post(url, json=payload, headers=headers, timeout=30)
+    try:
+        response.raise_for_status()
+    except requests.HTTPError:
+        print("GitHub Issue API response:", response.text)
+        raise
 
-    # Add the issue to our repository
-    response = requests.request("POST", url, data=payload, headers=headers)
-    if response.status_code == 202:
-        print ('Successfully created Issue "%s"' % title)
-    else:
-        print ('Could not create Issue "%s"' % title)
-        print ('Response:', response.content)
+    issue = response.json()
+    issue_number = issue.get("number")
+    issue_url = issue.get("html_url")
+    if not issue_number or not issue_url:
+        raise RuntimeError("GitHub returned no Issue number or URL.")
+
+    print('Successfully created Issue #{}: {}'.format(issue_number, issue_url))
+    return issue
 
 if __name__ == '__main__':
     title = 'Pretty title'
     body = 'Beautiful body'
-    assignee = USERNAME
-    closed = False
     labels = [
         "imagenet", "image retrieval"
     ]
 
-    make_github_issue(title, body, assignee, closed, labels)
+    make_github_issue(title, body, labels=labels)

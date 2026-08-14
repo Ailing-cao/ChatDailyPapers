@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   backup:
@@ -27,6 +28,9 @@ jobs:
           run: |
             if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
       -   name: Run backup
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           run: python main.py
 
       -   name: Commit changes

@@ -53,25 +53,20 @@ Issue构成：
 git clone https://github.com/XXX/xxx.git
 ```
 
-### 3、定义配置文件`config.py`：
+### 3、配置 GitHub Actions Secrets
 
-```python
-# Authentication for user filing issue (must have read/write access to repository to add issue to)
-USERNAME = 'changeme' #你的github账户名
-TOKEN = 'changeme' #你的个人访问令牌
+不要把任何令牌写入 `config.py` 或提交到仓库。进入仓库的
+`Settings → Secrets and variables → Actions`，新建：
 
-# The repository to add this issue to
-REPO_OWNER = 'changeme' #推送到的仓库拥有者账户名
-REPO_NAME = 'changeme' #推送到的仓库名
+- `OPENAI_API_KEY`：用于论文总结的 OpenAI API Key；
 
-# Set new submission url of subject
-NEW_SUB_URL = 'https://arxiv.org/list/cs/new'
+工作流会使用 GitHub 内置的短期 `GITHUB_TOKEN` 创建 Issue，因此无需创建
+或保存个人访问令牌。若本地运行，先在终端设置：
 
-# Keywords to search
-KEYWORD_LIST = ["changeme"]
-
-OPENAI_API_KEYS = ["",]  # chatgpt的api
-LANGUAGE = "zh"  # zh | en # chatgpt返回的语言，中文zh或英文en
+```bash
+export OPENAI_API_KEY='...'
+export GITHUB_TOKEN='...'
+export GITHUB_REPOSITORY='OWNER/REPOSITORY'
 ```
 
 ### 4、提交更新到Github
@@ -85,7 +80,9 @@ git commit -m 'first commit' # 代码由缓存区提交到本地仓库区
 git push origin main  # 推送origin分支到远程main仓库
 ```
 
-推送成功后，你会在仓库主页看到Github Action开始运行，等待一些时间后，可以在issues中发现一条更新，点击进去查看即可，同时在仓库的`export`文件夹中新增一个`.md`文件，记录了完整issues的内容。
+工作流会在定时任务执行，或在 Actions 页面手动运行后创建 Issue；普通 push
+不会触发它。等待任务结束后，可以在 Issues 中查看更新，同时 `export` 文件夹
+会新增记录完整内容的 `.md` 文件。
 
 ## 更多功能
 
@@ -96,11 +93,12 @@ git push origin main  # 推送origin分支到远程main仓库
 ```
 name: "daily allerts"
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
   schedule:
     -   cron: "10 20 * * 1,2,3,4,5"
+permissions:
+  contents: write
+  issues: write
 jobs:
   backup:
     runs-on: ubuntu-latest
@@ -172,4 +170,3 @@ arxiv文章自动issue：https://github.com/kobiso/get-daily-arxiv-noti
 配置github个人访问令牌：https://docs.github.com/cn/github/authenticating-to-github/keeping-your-account-and-data-secure/creating-a-personal-access-token
 
 chatpaper：https://github.com/kaixindelele/ChatPaper
-

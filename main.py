@@ -189,6 +189,9 @@ class Reader:
     def summary_with_chat(self, paper_list, htmls=None):
         if htmls is None:
             htmls = []
+        summaries_enabled = bool(self.chat_api_list)
+        if not summaries_enabled:
+            print("OPENAI_API_KEY is not configured; publishing paper metadata without AI summaries.")
         for paper_index, paper in enumerate(paper_list):
             # 第一步先用title，abs，和introduction进行总结。
             text = ''
@@ -199,15 +202,16 @@ class Reader:
             # intro
             text += list(paper.section_text_dict.values())[0]
             chat_summary_text = ""
-            try:
-                chat_summary_text = self.chat_summary(text=text)     
-            except Exception as e:
-                print("summary_error:", e)
-                if "maximum context" in str(e):
-                    current_tokens_index = str(e).find("your messages resulted in") + len("your messages resulted in")+1
-                    offset = int(str(e)[current_tokens_index:current_tokens_index+4])
-                    summary_prompt_token = offset+1000+150
-                    chat_summary_text = self.chat_summary(text=text, summary_prompt_token=summary_prompt_token)
+            if summaries_enabled:
+                try:
+                    chat_summary_text = self.chat_summary(text=text)
+                except Exception as e:
+                    print("summary_error:", e)
+                    if "maximum context" in str(e):
+                        current_tokens_index = str(e).find("your messages resulted in") + len("your messages resulted in")+1
+                        offset = int(str(e)[current_tokens_index:current_tokens_index+4])
+                        summary_prompt_token = offset+1000+150
+                        chat_summary_text = self.chat_summary(text=text, summary_prompt_token=summary_prompt_token)
 
             # htmls.append('## Paper:' + str(paper_index+1))
             htmls.append(f'## {paper.title}')
