@@ -1,18 +1,18 @@
 # encoding: utf-8
 """Non-secret configuration for the daily paper workflow.
 
-Credentials are intentionally read from environment variables.  In GitHub
+Credentials are intentionally read from environment variables. In GitHub
 Actions, configure ``OPENAI_API_KEY`` as a repository Actions secret; the
 workflow supplies GitHub's short-lived ``GITHUB_TOKEN`` automatically.
 """
 
 import os
 
-
 # Set new submission url of subject
 NEW_SUB_URL = 'https://arxiv.org/list/cs/new'
 
 # Keywords to search
+
 KEYWORD_LIST = [
     # 核心：视觉导航直接相关
     "visual navigation",
@@ -38,5 +38,4 @@ OPENAI_API_KEYS = [
     for key in os.getenv("OPENAI_API_KEY", "").split(",")
     if key.strip()
 ]
-
 LANGUAGE = "zh"  # zh | en

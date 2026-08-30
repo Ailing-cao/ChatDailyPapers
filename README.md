@@ -95,7 +95,7 @@ name: "daily allerts"
 on:
   workflow_dispatch:
   schedule:
-    -   cron: "10 20 * * 1,2,3,4,5"
+    -   cron: "30 2 * * 1-5"
 permissions:
   contents: write
   issues: write
@@ -122,7 +122,7 @@ jobs:
             commitMessage: Automated snapshot
 ```
 
-根据以上yml文件，github会定时触发预定流程（10 20 * * 1,2,3,4,5表示每周一,周二,周三,周四,周五的20:10，因为[arxiv](https://arxiv.org/help/submit)每天在零时区的20点更新，也就是说在东八区是每天4点更新，或者是在更新仓库后也会触发动作）； 具体触发过程：在指定环境下，安装依赖指定文件（由requirements.txt指定），然后执行`main.py`文件，最后，提交变化更新本仓库；
+以上配置会在 UTC 周一至周五的 02:30（北京时间 10:30）执行。arXiv 在美东时间周日至周四的 20:00 公布论文，对应夏令时 UTC 00:00、冬令时 UTC 01:00；因此任务会在公告后至少 1.5 小时再查询。这里不能安排 UTC 周六运行，因为 arXiv 周五晚不会发布新批次——这正是周六 Issue 为空、周五 Issue 有内容的原因。GitHub 的定时任务可能会有数分钟延迟。由于 arXiv API 的更新时间可能早于论文公告时间，脚本会回看最近 4 天，并根据已有 `export` 文件中的 arXiv ID 自动排除已经发布过的论文；这样既能覆盖周末后的公告，也不会每天重复发布。Issue 标题使用北京时间；若没有可发布论文，会跳过空的导出文件和 Issue。具体流程是：安装依赖、执行`main.py`，最后提交新增记录。
 
 ### 本地调试
 

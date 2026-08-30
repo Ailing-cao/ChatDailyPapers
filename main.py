@@ -8,7 +8,9 @@ import argparse
 import tiktoken
 from get_paper_from_pdf import Paper
 
+from arxiv_schedule import build_filter_window, format_issue_title, utc_now
 from github_issue import make_github_issue
+from publication_history import load_published_paper_ids, paper_id_from_url
 
 
 # os.environ["http_proxy"] = "http://127.0.0.1:8118"
@@ -16,17 +18,36 @@ from github_issue import make_github_issue
 
 from config import OPENAI_API_KEYS, KEYWORD_LIST, LANGUAGE
 
-from datetime import datetime, timedelta
-import pytz
+from datetime import datetime
 
-now = datetime.now(pytz.utc)
-yesterday = now - timedelta(days=1.1)
+
+# These words are useful in a human-readable topic name but make poor arXiv
+# search terms.  In particular, querying ``all:and`` made the SLAM topic
+# return no papers at all.
+QUERY_STOP_WORDS = frozenset({"a", "an", "and", "for", "in", "of", "or", "the", "to"})
+
+
+def keyword_terms(keyword):
+    """Return the meaningful words in a configured topic name."""
+    return [
+        term
+        for term in re.findall(r"[a-z0-9]+(?:-[a-z0-9]+)*", keyword.lower())
+        if term not in QUERY_STOP_WORDS
+    ]
+
+
+def build_arxiv_query(keyword):
+    """Build an arXiv all-fields query without stop words."""
+    terms = keyword_terms(keyword)
+    if not terms:
+        raise ValueError("A keyword must contain at least one searchable term.")
+    return " AND ".join(f"all:{term}" for term in terms)
 
 
 # 定义Reader类
 class Reader:
     # 初始化方法，设置属性
-    def __init__(self,  filter_keys, filter_times_span=(yesterday, now), key_word=None,      
+    def __init__(self, filter_keys, filter_times_span=None, key_word=None,
                  query=None,  root_path='./',
                  sort=arxiv.SortCriterion.LastUpdatedDate, 
                  user_name='defualt', args=None):
@@ -41,7 +62,9 @@ class Reader:
         else:
             self.language = 'Chinese'        
         self.filter_keys = filter_keys # 用于在摘要中筛选的关键词
-        self.filter_times_span = filter_times_span  # 用于选定某区间更新的arxiv paper
+        self.filter_times_span = filter_times_span or build_filter_window(
+            args.filter_times_span
+        )  # 用于选定某区间更新的arxiv paper
 
         self.root_path = root_path
 
@@ -82,25 +105,38 @@ class Reader:
         for index, result in enumerate(results):
             print(index, result.title, result.updated)
             
-        filter_results = []   
-        filter_keys = self.filter_keys
-        
-        print("filter_keys:", self.filter_keys)
-        # 确保每个关键词都能在摘要中找到，才算是目标论文
+        filter_results = []
+        filter_keys = keyword_terms(self.filter_keys)
+        outside_time_window = 0
+        missing_keywords = 0
+
+        print("filter_keys:", filter_keys)
+        print(
+            "filter_time_window:",
+            self.filter_times_span[0].isoformat(),
+            "to",
+            self.filter_times_span[1].isoformat(),
+        )
+        # 确保每个有效关键词都能在摘要中找到，才算是目标论文
         for index, result in enumerate(results):
             # 过滤不在时间范围内的论文
             if result.updated < self.filter_times_span[0] or result.updated > self.filter_times_span[1]:
-                continue 
-            abs_text = result.summary.replace('-\n', '-').replace('\n', ' ')
-            meet_num = 0
-            for f_key in filter_keys.split(" "):
-                if f_key.lower() in abs_text.lower():
-                    meet_num += 1
-            if meet_num == len(filter_keys.split(" ")):
+                outside_time_window += 1
+                continue
+            abs_text = result.summary.replace('-\n', '-').replace('\n', ' ').lower()
+            if all(f_key in abs_text for f_key in filter_keys):
                 filter_results.append(result)
-                # break
+            else:
+                missing_keywords += 1
         print("筛选后剩下的论文数量：")
         print("filter_results:", len(filter_results))
+        print(
+            "filter_counts:",
+            "candidates=", len(results),
+            "outside_time_window=", outside_time_window,
+            "missing_keywords=", missing_keywords,
+            "matched=", len(filter_results),
+        )
         print("filter_papers:")
         for index, result in enumerate(filter_results):
             print(index, result.title, result.updated)
@@ -445,7 +481,8 @@ def export_to_markdown(text, file_name, mode='w'):
         # 将html格式的内容写入文件
         f.write(text)
 
-def main(args):       
+def main(args, run_at=None):
+    run_at = run_at or utc_now()
     # 创建一个Reader对象，并调用show_info方法
     if args.sort == 'Relevance':
         sort = arxiv.SortCriterion.Relevance
@@ -477,21 +514,21 @@ def main(args):
         [print(paper_index, paper_name.path.split('\\')[-1]) for paper_index, paper_name in enumerate(paper_list)]
         reader1.summary_with_chat(paper_list=paper_list)
     else:
-        filter_times_span = (now-timedelta(days=args.filter_times_span), now)
-        title = str(now)[:13].replace(' ', '-')
+        filter_times_span = build_filter_window(
+            args.filter_times_span, run_at=run_at
+        )
+        title = format_issue_title(run_at)
+        print("workflow_run_at_utc:", filter_times_span[1].isoformat())
+        print("issue_title_asia_shanghai:", title)
+        published_paper_ids = load_published_paper_ids()
+        print("previously_published_papers:", len(published_paper_ids))
         htmls_body = []
         for filter_key in args.filter_keys:
             # 对于每一个主题做一遍
             # filter_key: remote sensing
             # query: all:remote AND all:sensing
             key_word = filter_key
-            query = ''
-            for item in filter_key.split(" "):
-                if query != '':
-                    query += ' AND '
-                query += f'all:{item}'
-            htmls = []
-            htmls.append(f'# {filter_key}')
+            query = build_arxiv_query(filter_key)
             reader1 = Reader(key_word=key_word, 
                             query=query, 
                             filter_keys=filter_key,
@@ -501,10 +538,35 @@ def main(args):
                             )
             reader1.show_info()
             filter_results = reader1.filter_arxiv(max_results=args.max_results)
+            unpublished_results = [
+                result
+                for result in filter_results
+                if paper_id_from_url(result.entry_id) not in published_paper_ids
+            ]
+            print(
+                "publication_history_filter:",
+                "matched=", len(filter_results),
+                "already_published=", len(filter_results) - len(unpublished_results),
+                "new=", len(unpublished_results),
+            )
+            filter_results = unpublished_results
+            if not filter_results:
+                print(f"No matching papers for '{filter_key}'; skipping this topic.")
+                continue
+
             paper_list = reader1.download_pdf(filter_results)
+            if not paper_list:
+                print(f"No publishable papers for '{filter_key}'; skipping this topic.")
+                continue
+
+            htmls = [f'# {filter_key}']
             reader1.summary_with_chat(paper_list=paper_list, htmls=htmls)
-            # htmls.append("#######test#########")
             htmls_body += htmls
+
+        if not htmls_body:
+            print("No publishable papers found; skipping empty export and GitHub Issue.")
+            return
+
         save_to_file(htmls_body, date_str=title, root_path='./')
         make_github_issue(title=title, body="\n".join(htmls_body), labels=args.filter_keys)
 
@@ -514,7 +576,12 @@ if __name__ == '__main__':
     parser.add_argument("--query", type=str, default='all:remote AND all:sensing', help="the query string, ti: xx, au: xx, all: xx,") 
     parser.add_argument("--key_word", type=str, default='remote sensing', help="the key word of user research fields")
     parser.add_argument("--filter_keys", type=list, default=KEYWORD_LIST, help="the filter key words, 摘要中每个单词都得有，才会被筛选为目标论文")
-    parser.add_argument("--filter_times_span", type=int, default=1.1, help='how many days of files to be filtered.')
+    parser.add_argument(
+        "--filter_times_span",
+        type=float,
+        default=4.0,
+        help='look back this many days for arXiv updates (default: 4.0).',
+    )
     parser.add_argument("--max_results", type=int, default=20, help="the maximum number of results")
     # arxiv.SortCriterion.Relevance
     parser.add_argument("--sort", type=str, default="LastUpdatedDate", help="another is LastUpdatedDate | Relevance")
