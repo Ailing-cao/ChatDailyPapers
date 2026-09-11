@@ -11,12 +11,14 @@ from get_paper_from_pdf import Paper
 from arxiv_schedule import build_filter_window, format_issue_title, utc_now
 from github_issue import make_github_issue
 from publication_history import load_published_paper_ids, paper_id_from_url
+from issue_utils import split_issue_bodies
 
 
 # os.environ["http_proxy"] = "http://127.0.0.1:8118"
 # os.environ["https_proxy"] = "http://127.0.0.1:8118"
 
 from config import OPENAI_API_KEYS, KEYWORD_LIST, LANGUAGE
+
 
 from datetime import datetime
 
@@ -568,7 +570,24 @@ def main(args, run_at=None):
             return
 
         save_to_file(htmls_body, date_str=title, root_path='./')
-        make_github_issue(title=title, body="\n".join(htmls_body), labels=args.filter_keys)
+        issue_bodies = split_issue_bodies(htmls_body)
+        for index, issue_body in enumerate(issue_bodies, start=1):
+            issue_title = title
+            if len(issue_bodies) > 1:
+                issue_title = f"{title} ({index}/{len(issue_bodies)})"
+            print(
+                "creating_issue:",
+                index,
+                "/",
+                len(issue_bodies),
+                "body_chars=",
+                len(issue_body),
+            )
+            make_github_issue(
+                title=issue_title,
+                body=issue_body,
+                labels=args.filter_keys,
+            )
 
 if __name__ == '__main__':    
     parser = argparse.ArgumentParser()
